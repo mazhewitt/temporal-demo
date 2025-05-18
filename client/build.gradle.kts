@@ -12,9 +12,10 @@ dependencies {
     implementation("org.slf4j:slf4j-simple:2.0.7")
     
     // Test dependencies
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.0")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")  // Use the BOM instead of individual artifacts
     testImplementation("org.assertj:assertj-core:3.24.2")
+    // Add explicit test framework implementation dependency to avoid deprecation warning
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.0")
 }
 
 application {

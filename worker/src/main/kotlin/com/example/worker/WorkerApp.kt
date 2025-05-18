@@ -10,7 +10,7 @@ import workflow_api.OrderActivitiesImpl
 
 fun main() {
     // Temporal service connection (localhost port-forwarded to Kubernetes)
-    val service = WorkflowServiceStubs.newInstance(
+    val service = WorkflowServiceStubs.newServiceStubs(
         WorkflowServiceStubsOptions.newBuilder()
             .setTarget("127.0.0.1:7233")
             .build()
