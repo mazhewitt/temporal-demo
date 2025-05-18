@@ -66,6 +66,21 @@ class OrderWorkflowE2ETest {
             // Verify the result is not null
             Assertions.assertNotNull(result, "Workflow result should not be null")
             
+            // Verify that the workflow completed successfully and the order was booked
+            Assertions.assertTrue(result.contains("Order workflow completed successfully"), 
+                "Result should indicate workflow completed successfully")
+            Assertions.assertTrue(result.contains("Order booked with ID ${order.orderId}"), 
+                "Result should indicate the order was booked with the correct order ID")
+                
+            // Add more detailed assertions to ensure all workflow steps executed correctly
+            with(order) {
+                // Check that the result correctly references our test data
+                Assertions.assertTrue(result.contains(orderId), 
+                    "Result should include the order ID")
+                Assertions.assertTrue(result.contains(client), 
+                    "Result should include the client information")
+            }
+            
             println("Workflow execution completed successfully.")
             println("Workflow result: $result")
         } catch (te: TimeoutException) {
@@ -73,8 +88,12 @@ class OrderWorkflowE2ETest {
             println("This may be expected behavior for long-running workflows")
             // We don't rethrow the exception as this might be expected behavior
             Assertions.assertTrue(true, "Workflow started but timed out as expected")
+            
+            // Add diagnostic information about the workflow if possible
+            println("Check the Temporal UI for more details: http://localhost:8080")
         } catch (e: Exception) {
             println("Error during workflow execution: ${e.message}")
+            println("Order details: $order")
             throw e
         }
     }
