@@ -81,6 +81,65 @@ The E2E test (`OrderWorkflowE2ETest`) works as follows:
 
 The test has an explicit 10-second timeout annotation using JUnit's `@Timeout`. If the workflow takes longer than 8 seconds to complete, the test will handle the timeout gracefully rather than failing.
 
+## RFQ Workflow Implementation
+
+The RFQ (Request for Quote) workflow implemented in this project follows a standard client-server negotiation pattern common in financial trading systems. Here's how it works:
+
+### Workflow Steps
+
+1. **Order Submission**
+   - Client submits a structured product order with details (product type, quantity, client info)
+   - The workflow instance starts with this order as input
+
+2. **Order Validation**
+   - The workflow first validates the order using the `validateOrder` activity
+   - Basic checks ensure the order meets business requirements
+
+3. **Quote Generation**
+   - If validation passes, the workflow creates a price quote using the `createQuote` activity
+   - Quote includes: price based on quantity, order ID, and expiration time (15 minutes)
+
+4. **Client Decision Wait Period**
+   - The workflow enters a waiting state where it:
+     - Responds to query requests with `getQuoteStatus()`
+     - Listens for acceptance/rejection signals
+     - Has a timeout for quote expiration
+
+5. **Quote Resolution**
+   - The workflow can end in three ways:
+     - Client accepts quote via `acceptQuote()` signal → proceed to execution
+     - Client rejects quote via `rejectQuote()` signal → end workflow
+     - Quote expires without client action → end workflow
+
+6. **Order Execution and Booking** (only if quote accepted)
+   - If quote is accepted, workflow calls `executeOrder()` with the original order and quote
+   - After execution, the order is booked with `bookOrder()` 
+   - Workflow completes with success message
+
+### Key Components
+
+1. **Data Classes**:
+   - `StructuredProductOrder`: Represents client order details
+   - `PriceQuote`: Contains price, order ID, and expiration time
+   - `OrderStepResult`: Standard result format for activities
+
+2. **Workflow Interface**:
+   - `processOrder`: Main workflow method
+   - `getQuoteStatus`: Query method to check current quote
+   - `acceptQuote` and `rejectQuote`: Signal methods for client decisions
+
+3. **Activity Interface**:
+   - Activities for each step, properly isolated for independent scaling
+
+### Client Interaction Pattern
+
+1. Client starts workflow with order details
+2. Client polls `getQuoteStatus()` to get quote information
+3. Client makes decision:
+   - Calls `acceptQuote()` to accept
+   - Calls `rejectQuote()` to reject
+4. Client can check final result with workflow completion
+
 ## Key Implementation Details
 
 ### Data Class Serialization
