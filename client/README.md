@@ -49,6 +49,12 @@ Build everything together:
 ./gradlew :client:build
 ```
 
+> If npm is not installed, the frontend build will be skipped automatically. To build only the backend:
+>
+> ```bash
+> ./gradlew :client:bootJar
+> ```
+
 Run the application:
 
 ```bash

@@ -52,6 +52,24 @@ tasks.register<Exec>("npmInstall") {
     commandLine = listOf("npm", "install")
     group = "frontend"
     description = "Install npm dependencies for the React frontend"
+    
+    // Make the task optional, continue on error
+    isIgnoreExitValue = true
+    
+    doFirst {
+        println("Attempting to run npm install. This is optional and will be skipped if npm is not available.")
+    }
+    
+    // Check if npm exists before running
+    onlyIf {
+        try {
+            val process = ProcessBuilder("which", "npm").start()
+            process.waitFor() == 0
+        } catch (e: Exception) {
+            println("npm not found. Skipping frontend build.")
+            false
+        }
+    }
 }
 
 tasks.register<Exec>("npmBuild") {
@@ -60,8 +78,26 @@ tasks.register<Exec>("npmBuild") {
     group = "frontend"
     description = "Build the React frontend"
     dependsOn("npmInstall")
+    
+    // Make the task optional, continue on error
+    isIgnoreExitValue = true
+    
+    // Check if npm exists before running
+    onlyIf {
+        try {
+            val process = ProcessBuilder("which", "npm").start()
+            process.waitFor() == 0
+        } catch (e: Exception) {
+            println("npm not found. Skipping frontend build.")
+            false
+        }
+    }
 }
 
-tasks.named("processResources") {
-    dependsOn("npmBuild")
+// Make the dependency on npmBuild conditional
+val processResourcesTask = tasks.named("processResources")
+tasks.findByName("npmBuild")?.let { npmBuild ->
+    processResourcesTask.configure {
+        dependsOn(npmBuild)
+    }
 }
