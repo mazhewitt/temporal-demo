@@ -8,33 +8,15 @@ import workflow_api.OrderWorkflow
 import workflow_api.StructuredProductOrder
 import java.util.UUID
 
+/**
+ * DEPRECATED: This main function has been refactored into a proper JUnit test.
+ * Please use the OrderWorkflowE2ETest class in the test directory instead.
+ * 
+ * @see com.example.client.OrderWorkflowE2ETest
+ */
 fun main() {
-    // Connect to Temporal service (localhost port-forwarded to Kubernetes)
-    val service = WorkflowServiceStubs.newInstance(
-        WorkflowServiceStubsOptions.newBuilder()
-            .setTarget("127.0.0.1:7233")
-            .build()
-    )
-    val client = WorkflowClient.newInstance(service)
-    val taskQueue = "ORDER_TASK_QUEUE"
-
-    // Create a sample order
-    val order = StructuredProductOrder(
-        orderId = UUID.randomUUID().toString(),
-        productType = "Equity Swap",
-        quantity = 10,
-        client = "TestClient"
-    )
-
-    // Create workflow stub
-    val workflow: OrderWorkflow = client.newWorkflowStub(
-        OrderWorkflow::class.java,
-        WorkflowOptions.newBuilder()
-            .setTaskQueue(taskQueue)
-            .build()
-    )
-
-    // Start workflow and get result
-    val result = workflow.processOrder(order)
-    println("Workflow result: $result")
+    println("This runner has been deprecated. Please use the OrderWorkflowE2ETest class instead.")
+    println("Run with: ./gradlew :client:test --tests \"com.example.client.OrderWorkflowE2ETest\"")
+    
+    // The implementation has been moved to the test class
 }
