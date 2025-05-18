@@ -1,5 +1,8 @@
 plugins {
     kotlin("jvm") version "2.0.0"
+    kotlin("plugin.spring") version "2.0.0"
+    id("org.springframework.boot") version "3.2.3"
+    id("io.spring.dependency-management") version "1.1.4"
     application
 }
 
@@ -9,23 +12,31 @@ dependencies {
     implementation(project(":workflow-api"))
     implementation("io.temporal:temporal-sdk:$temporalVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    implementation("org.slf4j:slf4j-simple:2.0.7")
+    
+    // Spring Boot dependencies
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    runtimeOnly("org.springframework.boot:spring-boot-devtools")
+    
+    // Use logback with Spring instead of slf4j-simple
+    implementation("ch.qos.logback:logback-classic:1.4.14")
     
     // Test dependencies
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")  // Use the BOM instead of individual artifacts
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
     testImplementation("org.assertj:assertj-core:3.24.2")
-    // Add explicit test framework implementation dependency to avoid deprecation warning
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.0")
     
     // Temporal testing dependencies
     testImplementation("io.temporal:temporal-testing:$temporalVersion")
     
     // Worker module for the workflow implementation
-    testImplementation(project(":worker"))
+    implementation(project(":worker"))
 }
 
 application {
-    mainClass.set("com.example.client.OrderWorkflowE2ETestRunnerKt")
+    mainClass.set("com.example.client.ApplicationKt")
 }
 
 tasks.test {
@@ -33,4 +44,24 @@ tasks.test {
     testLogging {
         events("passed", "skipped", "failed")
     }
+}
+
+// Tasks for the React frontend
+tasks.register<Exec>("npmInstall") {
+    workingDir = file("${projectDir}/frontend")
+    commandLine = listOf("npm", "install")
+    group = "frontend"
+    description = "Install npm dependencies for the React frontend"
+}
+
+tasks.register<Exec>("npmBuild") {
+    workingDir = file("${projectDir}/frontend")
+    commandLine = listOf("npm", "run", "build")
+    group = "frontend"
+    description = "Build the React frontend"
+    dependsOn("npmInstall")
+}
+
+tasks.named("processResources") {
+    dependsOn("npmBuild")
 }

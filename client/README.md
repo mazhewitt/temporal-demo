@@ -1,13 +1,70 @@
 # Client Module
 
-This module contains the client application to submit orders to the Temporal workflow and test utilities to verify workflow functionality.
+This module contains both:
+1. A web application with Spring Boot and React for submitting and managing orders
+2. A client application to submit orders to the Temporal workflow and test utilities
 
 ## Overview
 
 The client module provides:
-1. A client application to start workflow executions
-2. End-to-end tests for the order workflow
-3. Utilities for interacting with Temporal workflows
+1. A Spring Boot web application with REST APIs
+2. A React frontend for order management and quote handling
+3. End-to-end tests for the order workflow
+4. Utilities for interacting with Temporal workflows
+
+## Web Application
+
+The web application consists of:
+- Spring Boot backend with REST APIs
+- React frontend built with Vite and Material-UI
+- Integration with Temporal workflows for order processing
+
+### Running the Web Application
+
+#### Option 1: Development Mode
+
+Run the Spring Boot backend:
+
+```bash
+./gradlew :client:bootRun
+```
+
+Run the React frontend (in a separate terminal):
+
+```bash
+cd client/frontend
+npm install
+npm run dev
+```
+
+Access the application:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8081/api
+
+#### Option 2: Production Mode
+
+Build everything together:
+
+```bash
+./gradlew :client:build
+```
+
+Run the application:
+
+```bash
+java -jar client/build/libs/client.jar
+```
+
+Access the application at http://localhost:8081
+
+### API Endpoints
+
+- `POST /api/orders` - Submit a new order
+- `GET /api/orders` - List all orders
+- `GET /api/orders/{orderId}` - Get order status
+- `GET /api/orders/{orderId}/quote` - Get quote for an order
+- `POST /api/orders/{orderId}/accept` - Accept a quote
+- `POST /api/orders/{orderId}/reject` - Reject a quote
 
 ## Key Components
 

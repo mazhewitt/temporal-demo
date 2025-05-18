@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{15}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- Application logs -->
+    <logger name="com.example.client" level="DEBUG" />
+    
+    <!-- Spring logs -->
+    <logger name="org.springframework" level="INFO" />
+    
+    <!-- Temporal logs -->
+    <logger name="io.temporal" level="INFO" />
+    
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>

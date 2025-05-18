@@ -6,7 +6,7 @@ This project demonstrates a structured product order processing workflow using [
 
 - **[workflow-api](./workflow-api/README.md)**: Contains the API interfaces and data models for the workflow
 - **[worker](./worker/README.md)**: Implements the workflow logic and activities
-- **[client](./client/README.md)**: Client application to submit orders to the workflow
+- **[client](./client/README.md)**: Web application with Spring Boot and React frontend for submitting and managing orders
 
 > **Note**: There's a duplicate directory `workflow_api` alongside `workflow-api` in the project. The build files reference `workflow-api` (with a hyphen), which is the correct version to use. For cleanup, consider removing the `workflow_api` (with underscore) directory if not needed.
 
@@ -45,15 +45,42 @@ Build all components with Gradle:
 ./gradlew build
 ```
 
-### 3. Start the Worker
+### 3. Running the Web Application
 
-Start the worker to process workflow tasks:
+You can run the complete web application (both Spring Boot backend and React frontend) with a single command using our convenience script:
 
+```bash
+./start-application.sh
+```
+
+This script will:
+1. Check if Temporal is running and try to start it if needed
+2. Start the worker process in the background
+3. Start the Spring Boot web application
+
+Alternatively, you can run components individually:
+
+#### Start the Worker
 ```bash
 ./gradlew :worker:run
 ```
 
-Keep this terminal running while testing the workflow.
+#### Start the Backend API
+```bash
+./gradlew :client:bootRun
+```
+
+#### Start the React Frontend in Development Mode
+```bash
+cd client/frontend
+npm install
+npm run dev
+```
+
+Once running, you can access:
+- Web UI: http://localhost:8081 (production) or http://localhost:5173 (development)
+- Temporal UI: http://localhost:8080
+- REST API: http://localhost:8081/api
 
 ### 4. Running the E2E Test
 
@@ -206,3 +233,8 @@ If you encounter issues with port forwarding or connecting to Temporal:
 ## License
 
 This project is for demonstration purposes.
+
+
+## Detailed Setup Guide
+
+For detailed setup instructions and development workflows, see [SETUP.md](./SETUP.md).
