@@ -81,6 +81,36 @@ The E2E test (`OrderWorkflowE2ETest`) works as follows:
 
 The test has an explicit 10-second timeout annotation using JUnit's `@Timeout`. If the workflow takes longer than 8 seconds to complete, the test will handle the timeout gracefully rather than failing.
 
+## Key Implementation Details
+
+### Data Class Serialization
+
+When using Kotlin data classes with Temporal workflows, proper serialization is crucial. This project uses Jackson annotations to ensure correct serialization:
+
+```kotlin
+data class StructuredProductOrder @JsonCreator constructor(
+    @JsonProperty("orderId") val orderId: String,
+    @JsonProperty("productType") val productType: String,
+    @JsonProperty("quantity") val quantity: Int,
+    @JsonProperty("client") val client: String
+)
+```
+
+All data classes that are passed between workflow and activities need these annotations to ensure proper serialization/deserialization.
+
+### Activity Timeout Configuration
+
+Always configure timeouts for activities to ensure they terminate properly:
+
+```kotlin
+private val activities = Workflow.newActivityStub(
+    OrderActivities::class.java,
+    ActivityOptions.newBuilder()
+        .setStartToCloseTimeout(Duration.ofSeconds(30))
+        .build()
+)
+```
+
 ## Monitoring
 
 You can monitor workflow executions through the Temporal Web UI at http://localhost:8080
@@ -98,6 +128,11 @@ If you encounter issues with port forwarding or connecting to Temporal:
    ```bash
    ps aux | grep "port-forward"
    ```
+
+3. Common workflow errors and solutions:
+   - **Serialization errors**: Ensure all data classes have appropriate Jackson annotations
+   - **Activity timeout errors**: Configure proper timeout settings for all activities
+   - **Worker not processing tasks**: Verify that the worker is running and targeting the correct task queue
 
 3. Restart port forwarding if needed:
    ```bash

@@ -36,9 +36,9 @@ class OrderWorkflowE2ETest {
     }
 
     @Test
-    @DisplayName("Should process order successfully or timeout after 10 seconds")
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    fun testOrderWorkflowExecution() {
+    @DisplayName("Should process RFQ order successfully when client accepts quote")
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    fun testOrderWorkflowWithQuoteAcceptance() {
         // Create a sample order
         val order = StructuredProductOrder(
             orderId = UUID.randomUUID().toString(),
@@ -52,32 +52,32 @@ class OrderWorkflowE2ETest {
             OrderWorkflow::class.java,
             WorkflowOptions.newBuilder()
                 .setTaskQueue(taskQueue)
-                .setWorkflowExecutionTimeout(java.time.Duration.ofSeconds(8))
+                .setWorkflowExecutionTimeout(java.time.Duration.ofSeconds(30))
                 .build()
         )
 
-        // Start workflow execution and wait for result
-        val future = WorkflowClient.execute(workflow::processOrder, order)
+        // Start workflow execution asynchronously
+        val workflowExecution = WorkflowClient.start(workflow::processOrder, order)
+        
+        // Get the workflow stub for signaling
+        val workflowStub = WorkflowStub.fromTyped(workflow)
         
         try {
-            val result = future.get(8, TimeUnit.SECONDS)
+            // Wait a short time for the quote to be created
+            Thread.sleep(2000)
             
-            // Verify the result is not null
+            // Query the workflow to get the current quote
+            val quote = workflow.getQuoteStatus()
+            
+            // Simulate client accepting the quote
+            workflow.acceptQuote()
+            
+            // Wait for workflow completion
+            val result = workflowStub.getResult(12, TimeUnit.SECONDS, String::class.java)
+            
+            // Verify the result
             Assertions.assertNotNull(result, "Workflow result should not be null")
-            
-            // Verify that the workflow completed successfully and the order was booked
-            Assertions.assertTrue(result.contains("Order workflow completed successfully"), 
-                "Result should indicate workflow completed successfully")
-            Assertions.assertTrue(result.contains("Order booked with ID ${order.orderId}"), 
-                "Result should indicate the order was booked with the correct order ID")
-                
-            // Check that the result references our test data
-            with(order) {
-                Assertions.assertTrue(result.contains(orderId), 
-                    "Result should include the order ID")
-                Assertions.assertTrue(result.contains(client), 
-                    "Result should include the client information")
-            }
+            Assertions.assertTrue(result.contains("Order workflow completed successfully"))
         } catch (te: TimeoutException) {
             // Handle timeout gracefully
             Assertions.assertTrue(true, "Workflow started but timed out as expected")

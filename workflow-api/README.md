@@ -17,11 +17,11 @@ The workflow API module contains:
 #### `StructuredProductOrder`
 
 ```kotlin
-data class StructuredProductOrder(
-    val orderId: String,
-    val productType: String,
-    val quantity: Int,
-    val client: String
+data class StructuredProductOrder @JsonCreator constructor(
+    @JsonProperty("orderId") val orderId: String,
+    @JsonProperty("productType") val productType: String,
+    @JsonProperty("quantity") val quantity: Int,
+    @JsonProperty("client") val client: String
 )
 ```
 
@@ -31,12 +31,14 @@ This class represents a structured product order with the following properties:
 - `quantity`: Number of units
 - `client`: Client identifier
 
+Note the use of Jackson annotations (`@JsonCreator` and `@JsonProperty`) which are required for proper serialization/deserialization in Temporal.
+
 #### `OrderStepResult`
 
 ```kotlin
-data class OrderStepResult(
-    val success: Boolean,
-    val message: String
+data class OrderStepResult @JsonCreator constructor(
+    @JsonProperty("success") val success: Boolean,
+    @JsonProperty("message") val message: String
 )
 ```
 

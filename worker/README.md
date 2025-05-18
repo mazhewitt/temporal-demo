@@ -18,32 +18,46 @@ The `OrderWorkflowImpl` class implements the `OrderWorkflow` interface from the 
 ```kotlin
 class OrderWorkflowImpl : OrderWorkflow {
     private val activities = Workflow.newActivityStub(
-        OrderActivities::class.java
+        OrderActivities::class.java,
+        ActivityOptions.newBuilder()
+            .setStartToCloseTimeout(Duration.ofSeconds(30))
+            .build()
     )
 
+    private var currentQuote: PriceQuote? = null
+    private var quoteAccepted = false
+    private var quoteRejected = false
+
     override fun processOrder(order: StructuredProductOrder): String {
+        // Validate the order
         val validation = activities.validateOrder(order)
         if (!validation.success) return "Validation failed: ${validation.message}"
-
-        val pricing = activities.priceOrder(order)
-        if (!pricing.success) return "Pricing failed: ${pricing.message}"
-
-        val execution = activities.executeOrder(order)
-        if (!execution.success) return "Execution failed: ${execution.message}"
-
-        val booking = activities.bookOrder(order)
-        if (!booking.success) return "Booking failed: ${booking.message}"
-
-        return "Order workflow completed successfully: ${booking.message}"
+        
+        // Create a quote for the order
+        currentQuote = activities.createQuote(order)
+        Workflow.getLogger(this.javaClass).info("Quote created: $${currentQuote?.price} for order ${order.orderId}")
+        
+        // Wait for client response or timeout
+        val quoteTimeout = Duration.ofMinutes(15)
+        Workflow.await(quoteTimeout, {
+            quoteAccepted || quoteRejected || isQuoteExpired()
+        })
+        
+        // Further processing based on client response
+        // ...
     }
 }
 ```
 
 The workflow implementation:
-1. Creates activity stubs to execute the activities
-2. Executes each activity in sequence: validate → price → execute → book
-3. Returns immediately if any step fails
-4. Returns a success message if all steps complete successfully
+1. Creates activity stubs with proper timeout configuration
+2. Manages the RFQ (Request For Quote) workflow with the following steps:
+   - Validate the order
+   - Create a price quote
+   - Wait for client acceptance/rejection or quote expiry
+   - Execute and book the order if accepted
+3. Uses Temporal signals (`acceptQuote`/`rejectQuote`) for client interactions
+4. Provides query capabilities to check quote status
 
 ### Worker Application
 
