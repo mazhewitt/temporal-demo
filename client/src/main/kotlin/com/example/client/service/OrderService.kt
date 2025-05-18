@@ -13,7 +13,8 @@ import java.util.concurrent.TimeUnit
 
 @Service
 class OrderService(private val workflowClient: WorkflowClient) {
-
+    
+    private val logger = org.slf4j.LoggerFactory.getLogger(OrderService::class.java)
     private val taskQueue = "ORDER_TASK_QUEUE"
     
     // Store of active workflow IDs to their order IDs for tracking
@@ -84,32 +85,73 @@ class OrderService(private val workflowClient: WorkflowClient) {
      * Accept a quote for an order
      */
     fun acceptQuote(orderId: String): Boolean {
-        val workflowId = workflowExecutionMap[orderId] ?: return false
+        val workflowId = workflowExecutionMap[orderId] ?: run {
+            logger.error("Quote acceptance failed: WorkflowId not found for orderId=$orderId")
+            return false
+        }
         
-        val workflow = workflowClient.newWorkflowStub(
-            OrderWorkflow::class.java,
-            workflowId
-        )
-        
-        // Send accept signal to the workflow
-        workflow.acceptQuote()
-        return true
+        return try {
+            logger.debug("Accepting quote for order=$orderId, workflow=$workflowId")
+            
+            val workflow = workflowClient.newWorkflowStub(
+                OrderWorkflow::class.java,
+                workflowId
+            )
+            
+            // Check if quote exists and is still valid
+            val quote = workflow.getQuoteStatus()
+            if (quote == null) {
+                logger.error("Quote acceptance failed: No quote found for orderId=$orderId")
+                return false
+            }
+            
+            if (isExpired(quote)) {
+                logger.error("Quote acceptance failed: Quote expired for orderId=$orderId")
+                return false
+            }
+            
+            // Send accept signal to the workflow
+            workflow.acceptQuote()
+            logger.info("Quote successfully accepted for orderId=$orderId, price=${quote.price}")
+            true
+        } catch (e: Exception) {
+            logger.error("Error accepting quote for order=$orderId: ${e.message}", e)
+            false
+        }
     }
     
     /**
      * Reject a quote for an order
      */
     fun rejectQuote(orderId: String): Boolean {
-        val workflowId = workflowExecutionMap[orderId] ?: return false
+        val workflowId = workflowExecutionMap[orderId] ?: run {
+            logger.error("Quote rejection failed: WorkflowId not found for orderId=$orderId")
+            return false
+        }
         
-        val workflow = workflowClient.newWorkflowStub(
-            OrderWorkflow::class.java,
-            workflowId
-        )
-        
-        // Send reject signal to the workflow
-        workflow.rejectQuote()
-        return true
+        return try {
+            logger.debug("Rejecting quote for order=$orderId, workflow=$workflowId")
+            
+            val workflow = workflowClient.newWorkflowStub(
+                OrderWorkflow::class.java,
+                workflowId
+            )
+            
+            // Check if quote exists
+            val quote = workflow.getQuoteStatus()
+            if (quote == null) {
+                logger.error("Quote rejection failed: No quote found for orderId=$orderId")
+                return false
+            }
+            
+            // Send reject signal to the workflow
+            workflow.rejectQuote()
+            logger.info("Quote successfully rejected for orderId=$orderId")
+            true
+        } catch (e: Exception) {
+            logger.error("Error rejecting quote for order=$orderId: ${e.message}", e)
+            false
+        }
     }
     
     /**

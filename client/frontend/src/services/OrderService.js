@@ -54,6 +54,12 @@ export const OrderService = {
       return response.data;
     } catch (error) {
       console.error(`Error accepting quote for order ${orderId}:`, error);
+      // Add detailed error information
+      if (error.response) {
+        console.error(`Server returned error ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+      } else if (error.request) {
+        console.error('No response received from server. Network issue?');
+      }
       throw error;
     }
   },
@@ -65,6 +71,12 @@ export const OrderService = {
       return response.data;
     } catch (error) {
       console.error(`Error rejecting quote for order ${orderId}:`, error);
+      // Add detailed error information
+      if (error.response) {
+        console.error(`Server returned error ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+      } else if (error.request) {
+        console.error('No response received from server. Network issue?');
+      }
       throw error;
     }
   }

@@ -128,6 +128,19 @@ class OrderControllerTest {
     fun `should accept quote`() {
         // Given
         val orderId = UUID.randomUUID().toString()
+        val orderStatus = com.example.client.service.OrderStatusResponse(
+            orderId = orderId,
+            workflowId = "workflow-1",
+            status = "IN_PROGRESS",
+            quote = com.example.client.service.QuoteResponse(
+                orderId = orderId,
+                price = 500.0,
+                expiresAt = System.currentTimeMillis() + 900000, // 15 minutes from now
+                isExpired = false
+            )
+        )
+        
+        `when`(orderService.getOrderStatus(orderId)).thenReturn(orderStatus)
         `when`(orderService.acceptQuote(orderId)).thenReturn(true)
         
         // When & Then
@@ -140,6 +153,19 @@ class OrderControllerTest {
     fun `should reject quote`() {
         // Given
         val orderId = UUID.randomUUID().toString()
+        val orderStatus = com.example.client.service.OrderStatusResponse(
+            orderId = orderId,
+            workflowId = "workflow-1",
+            status = "IN_PROGRESS",
+            quote = com.example.client.service.QuoteResponse(
+                orderId = orderId,
+                price = 500.0,
+                expiresAt = System.currentTimeMillis() + 900000, // 15 minutes from now
+                isExpired = false
+            )
+        )
+        
+        `when`(orderService.getOrderStatus(orderId)).thenReturn(orderStatus)
         `when`(orderService.rejectQuote(orderId)).thenReturn(true)
         
         // When & Then

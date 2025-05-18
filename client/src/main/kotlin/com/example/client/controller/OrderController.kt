@@ -45,21 +45,45 @@ class OrderController(private val orderService: OrderService) {
 
     @PostMapping("/orders/{orderId}/accept")
     fun acceptQuote(@PathVariable orderId: String): ResponseEntity<Map<String, String>> {
+        // Check if order exists first
+        val orderStatus = orderService.getOrderStatus(orderId)
+            ?: return ResponseEntity.status(404).body(mapOf("error" to "Order not found"))
+            
+        // Check if the quote exists and is not expired
+        val quote = orderStatus.quote
+        if (quote == null) {
+            return ResponseEntity.status(400).body(mapOf("error" to "No quote available for this order"))
+        }
+        
+        if (quote.isExpired) {
+            return ResponseEntity.status(400).body(mapOf("error" to "Quote has expired"))
+        }
+        
         val result = orderService.acceptQuote(orderId)
         return if (result) {
             ResponseEntity.ok(mapOf("message" to "Quote accepted successfully"))
         } else {
-            ResponseEntity.notFound().build()
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to accept quote"))
         }
     }
 
     @PostMapping("/orders/{orderId}/reject")
     fun rejectQuote(@PathVariable orderId: String): ResponseEntity<Map<String, String>> {
+        // Check if order exists first
+        val orderStatus = orderService.getOrderStatus(orderId)
+            ?: return ResponseEntity.status(404).body(mapOf("error" to "Order not found"))
+            
+        // Check if the quote exists
+        val quote = orderStatus.quote
+        if (quote == null) {
+            return ResponseEntity.status(400).body(mapOf("error" to "No quote available for this order"))
+        }
+        
         val result = orderService.rejectQuote(orderId)
         return if (result) {
             ResponseEntity.ok(mapOf("message" to "Quote rejected successfully"))
         } else {
-            ResponseEntity.notFound().build()
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to reject quote"))
         }
     }
 }

@@ -94,12 +94,14 @@ const OrderDetail = () => {
       message: `Are you sure you want to accept the quote of $${orderStatus?.quote?.price.toFixed(2)}?`,
       action: async () => {
         try {
-          await OrderService.acceptQuote(orderId);
+          const response = await OrderService.acceptQuote(orderId);
           closeConfirmDialog();
           handleRefresh();
         } catch (error) {
           console.error('Error accepting quote:', error);
-          setError('Failed to accept quote. Please try again.');
+          // Get detailed error message from the response if available
+          const errorMsg = error.response?.data?.error || 'Failed to accept quote. Please try again.';
+          setError(errorMsg);
           closeConfirmDialog();
         }
       }
@@ -113,12 +115,14 @@ const OrderDetail = () => {
       message: 'Are you sure you want to reject this quote?',
       action: async () => {
         try {
-          await OrderService.rejectQuote(orderId);
+          const response = await OrderService.rejectQuote(orderId);
           closeConfirmDialog();
           handleRefresh();
         } catch (error) {
           console.error('Error rejecting quote:', error);
-          setError('Failed to reject quote. Please try again.');
+          // Get detailed error message from the response if available
+          const errorMsg = error.response?.data?.error || 'Failed to reject quote. Please try again.';
+          setError(errorMsg);
           closeConfirmDialog();
         }
       }
