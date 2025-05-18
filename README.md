@@ -72,8 +72,11 @@ The E2E test (`OrderWorkflowE2ETest`) works as follows:
    - Creates a sample `StructuredProductOrder` with random UUID
    - Submits the order to the Temporal workflow using the `ORDER_TASK_QUEUE`
    - Waits for the workflow to complete (with a 10-second timeout)
-3. **Verification**:
+3. **Comprehensive Verification**:
    - Verifies that the workflow returns a non-null result
+   - Confirms that the result contains "Order workflow completed successfully"
+   - Validates that the order was successfully booked with the correct order ID
+   - Checks that important order data (client information, order ID) appears in the result
    - Handles timeouts gracefully for long-running workflows
 
 The test has an explicit 10-second timeout annotation using JUnit's `@Timeout`. If the workflow takes longer than 8 seconds to complete, the test will handle the timeout gracefully rather than failing.
