@@ -13,5 +13,5 @@ dependencies {
 }
 
 application {
-    mainClass.set("com.example.client.ClientAppKt")
+    mainClass.set("com.example.client.OrderWorkflowE2ETestRunnerKt")
 }

@@ -1,4 +1,12 @@
-val temporalVersion = "1.14.1"
+plugins {
+    kotlin("jvm") version "2.0.0"
+}
+
+repositories {
+    mavenCentral()
+}
+
+val temporalVersion = "1.23.0"
 
 dependencies {
     implementation("io.temporal:temporal-sdk:$temporalVersion")
