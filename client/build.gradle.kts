@@ -16,6 +16,12 @@ dependencies {
     testImplementation("org.assertj:assertj-core:3.24.2")
     // Add explicit test framework implementation dependency to avoid deprecation warning
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.0")
+    
+    // Temporal testing dependencies
+    testImplementation("io.temporal:temporal-testing:$temporalVersion")
+    
+    // Worker module for the workflow implementation
+    testImplementation(project(":worker"))
 }
 
 application {
