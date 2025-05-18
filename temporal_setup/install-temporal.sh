@@ -38,6 +38,11 @@ kubectl -n temporal rollout status deployment/temporaltest-frontend
 echo "All deployments are ready. Current pods:"
 kubectl -n temporal get pods
 
+# Create default namespace for Temporal
+echo "Creating 'default' namespace in Temporal..."
+kubectl -n temporal exec deploy/temporaltest-admintools -- tctl --namespace default namespace register || true
+echo "Default namespace registered"
+
 # Function for cleaning up port-forwards
 cleanup_port_forwards() {
   echo "Cleaning up existing port forwards..."
@@ -64,8 +69,8 @@ cleanup_port_forwards() {
   pkill -f "kubectl -n temporal port-forward svc/temporaltest-web" 2>/dev/null || true
 }
 
-# Setup trap to clean up port-forwards on script exit
-trap cleanup_port_forwards EXIT INT TERM
+# Comment out trap to allow port-forwarding to continue running after script exit
+# trap cleanup_port_forwards EXIT INT TERM
 
 # Set up port forwarding
 echo "Setting up port forwarding..."
