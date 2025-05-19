@@ -1,5 +1,6 @@
 package com.example.client
 
+import com.example.client.service.OrderError
 import com.example.client.service.OrderRequest
 import com.example.client.service.OrderService
 import com.example.client.service.QuoteResponse
@@ -62,12 +63,17 @@ class QuoteErrorHandlingTest {
         
         // Mock OrderService responses
         Mockito.`when`(orderService.getOrderStatus(orderId)).thenReturn(
-            com.example.client.service.OrderStatusResponse(
+            Result.success(com.example.client.service.OrderStatusResponse(
                 orderId = orderId,
                 workflowId = "order-$orderId",
                 status = "IN_PROGRESS",
                 quote = expiredQuote
-            )
+            ))
+        )
+        
+        // Mock the acceptQuote method to return QuoteExpired error
+        Mockito.`when`(orderService.acceptQuote(orderId)).thenReturn(
+            Result.failure(OrderError.QuoteExpired("Quote expired for orderId=$orderId", orderId, expiredQuote.expiresAt))
         )
         
         // Try to accept an expired quote
@@ -86,9 +92,11 @@ class QuoteErrorHandlingTest {
     @Test
     @DisplayName("Should handle non-existent orders properly")
     fun testNonExistentOrderHandling() {
-        // Setup - mock service to return null for a non-existent order
+        // Setup - mock service to return error for a non-existent order
         val nonExistentOrderId = UUID.randomUUID().toString()
-        Mockito.`when`(orderService.getOrderStatus(nonExistentOrderId)).thenReturn(null)
+        Mockito.`when`(orderService.getOrderStatus(nonExistentOrderId)).thenReturn(
+            Result.failure(OrderError.WorkflowNotFound("Workflow not found for order ID: $nonExistentOrderId", nonExistentOrderId))
+        )
         
         // Try to accept a quote for a non-existent order
         val acceptResponse = restTemplate.postForEntity(
@@ -111,12 +119,12 @@ class QuoteErrorHandlingTest {
         
         // Mock OrderService responses
         Mockito.`when`(orderService.getOrderStatus(orderId)).thenReturn(
-            com.example.client.service.OrderStatusResponse(
+            Result.success(com.example.client.service.OrderStatusResponse(
                 orderId = orderId,
                 workflowId = "order-$orderId",
                 status = "IN_PROGRESS",
                 quote = null
-            )
+            ))
         )
         
         // Try to accept a non-existent quote

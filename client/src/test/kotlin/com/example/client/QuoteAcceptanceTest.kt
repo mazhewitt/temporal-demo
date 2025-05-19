@@ -64,7 +64,8 @@ class QuoteAcceptanceTest {
             client = "TestClient"
         )
         
-        val submitResponse = orderService.submitOrder(orderRequest)
+        val submitResult = orderService.submitOrder(orderRequest)
+        val submitResponse = submitResult.getOrThrow() // Extract from Result
         val orderId = submitResponse.orderId
         val workflowId = submitResponse.workflowId
         logger.info("Order submitted with ID: $orderId, Workflow ID: $workflowId")
@@ -74,19 +75,21 @@ class QuoteAcceptanceTest {
         
         // 3. ACCEPT QUOTE
         logger.info("Accepting quote for order $orderId")
-        val acceptSuccess = orderService.acceptQuote(orderId)
+        val acceptResult = orderService.acceptQuote(orderId)
+        val acceptSuccess = acceptResult.getOrThrow() // Extract from Result
         Assertions.assertTrue(acceptSuccess, "Quote acceptance should be successful")
         
         // 4. Allow time for workflow to complete
         testEnv.sleep(Duration.ofSeconds(3))
         
         // 5. Check final status
-        val statusResponse = orderService.getOrderStatus(orderId)
-        logger.info("Final order status: ${statusResponse?.status}")
+        val statusResult = orderService.getOrderStatus(orderId)
+        val statusResponse = statusResult.getOrThrow() // Extract from Result
+        logger.info("Final order status: ${statusResponse.status}")
         
         // Should be BOOKED
         Assertions.assertNotNull(statusResponse, "Order status response should not be null")
-        Assertions.assertEquals("BOOKED", statusResponse?.status, 
+        Assertions.assertEquals("BOOKED", statusResponse.status, 
             "Order status should be BOOKED after acceptance")
     }
 }

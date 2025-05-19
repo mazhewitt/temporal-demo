@@ -3,6 +3,7 @@ package com.example.client.service
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.temporal.client.WorkflowStub
+import io.temporal.api.common.v1.WorkflowExecution
 import org.springframework.stereotype.Service
 import workflow_api.OrderWorkflow
 import workflow_api.PriceQuote
@@ -10,6 +11,38 @@ import workflow_api.StructuredProductOrder
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
+/**
+ * Sealed class hierarchy for order operation errors
+ */
+sealed class OrderError(override val message: String, cause: Throwable? = null) : Exception(message, cause) {
+    
+    data class WorkflowNotFound(
+        val errorMessage: String, 
+        val orderId: String
+    ) : OrderError(errorMessage)
+    
+    data class QuoteNotFound(
+        val errorMessage: String, 
+        val orderId: String
+    ) : OrderError(errorMessage)
+    
+    data class QuoteExpired(
+        val errorMessage: String, 
+        val orderId: String, 
+        val expiryTime: Long
+    ) : OrderError(errorMessage)
+    
+    data class WorkflowOperationFailed(
+        val errorMessage: String, 
+        val errorCause: Throwable? = null
+    ) : OrderError(errorMessage, errorCause)
+    
+    data class UnknownError(
+        val errorMessage: String, 
+        val errorCause: Throwable? = null
+    ) : OrderError(errorMessage, errorCause)
+}
 
 @Service
 class OrderService(
@@ -25,8 +58,11 @@ class OrderService(
 
     /**
      * Submit a new order to the Temporal workflow
+     * 
+     * @param orderRequest The order details to submit
+     * @return Result containing OrderResponse on success or an OrderError on failure
      */
-    fun submitOrder(orderRequest: OrderRequest): OrderResponse {
+    fun submitOrder(orderRequest: OrderRequest): Result<OrderResponse> = runCatching {
         // Generate a unique order ID
         val orderId = UUID.randomUUID().toString()
         
@@ -38,174 +74,155 @@ class OrderService(
             client = orderRequest.client
         )
         
-        // Create workflow options
-        val workflowOptions = WorkflowOptions.newBuilder()
-            .setTaskQueue(this.taskQueueName) // Modified: Use the taskQueueName from constructor
-            .setWorkflowId("order-$orderId")
-            .build()
-        
-        // Create workflow stub
-        val workflow = workflowClient.newWorkflowStub(
-            OrderWorkflow::class.java, 
-            workflowOptions
-        )
-        
-        // Start workflow execution asynchronously
-        val workflowExecution = WorkflowClient.start(workflow::processOrder, order)
-        
-        // Store the workflow execution ID for later reference
-        workflowExecutionMap[orderId] = workflowExecution.workflowId
-        
-        return OrderResponse(
-            orderId = orderId,
-            workflowId = workflowExecution.workflowId,
-            status = "SUBMITTED"
-        )
+        try {
+            // Create workflow options
+            val workflowOptions = WorkflowOptions.newBuilder()
+                .setTaskQueue(this.taskQueueName)
+                .setWorkflowId("order-$orderId")
+                .build()
+            
+            // Create workflow stub
+            val workflow = workflowClient.newWorkflowStub(
+                OrderWorkflow::class.java, 
+                workflowOptions
+            )
+            
+            // Start workflow execution asynchronously
+            val workflowExecution = startWorkflow(workflow, order)
+            
+            // Store the workflow execution ID for later reference
+            workflowExecutionMap[orderId] = workflowExecution.workflowId
+            
+            OrderResponse(
+                orderId = orderId,
+                workflowId = workflowExecution.workflowId,
+                status = "SUBMITTED"
+            )
+        } catch (e: Exception) {
+            logger.error("Error submitting order: ${e.message}", e)
+            throw OrderError.WorkflowOperationFailed("Failed to submit order: ${e.message}", e)
+        }
     }
     
     /**
      * Get the quote status for an order
+     * 
+     * @param orderId The ID of the order to get the quote for
+     * @return Result containing either QuoteResponse or an OrderError
      */
-    fun getQuote(orderId: String): QuoteResponse? {
-        val workflowId = workflowExecutionMap[orderId] ?: return null
+    fun getQuote(orderId: String): Result<QuoteResponse> = runCatching {
+        val workflowId = workflowExecutionMap[orderId] 
+            ?: throw OrderError.WorkflowNotFound("Workflow not found for order ID: $orderId", orderId)
         
         try {
             // Use a typed stub with timeout options
-            val workflow = workflowClient.newWorkflowStub(
-                OrderWorkflow::class.java,
-                workflowId
-            )
+            val quote = getQuoteFromWorkflow(workflowId) 
+                ?: throw OrderError.QuoteNotFound("No quote found for order ID: $orderId", orderId)
             
-            // Execute query with a timeout
-            val workflowStubImpl = WorkflowStub.fromTyped(workflow)
-            val quote = workflowStubImpl.query("getQuoteStatus", PriceQuote::class.java, 5, TimeUnit.SECONDS) ?: return null
-            
-            return QuoteResponse(
+            QuoteResponse(
                 orderId = quote.orderId,
                 price = quote.price,
                 expiresAt = quote.expiryTimeMs,
                 isExpired = isExpired(quote)
             )
+        } catch (e: OrderError) {
+            throw e
         } catch (e: Exception) {
             logger.error("Error getting quote for order=$orderId: ${e.message}", e)
-            return null
+            throw OrderError.WorkflowOperationFailed("Error getting quote for order: $orderId", e)
         }
     }
     
     /**
      * Accept a quote for an order
+     * 
+     * @param orderId The ID of the order to accept the quote for
+     * @return Result containing Boolean success indicator or an OrderError
      */
-    fun acceptQuote(orderId: String): Boolean {
-        val workflowId = workflowExecutionMap[orderId] ?: run {
-            logger.error("Quote acceptance failed: WorkflowId not found for orderId=$orderId")
-            return false
-        }
+    fun acceptQuote(orderId: String): Result<Boolean> = runCatching {
+        val workflowId = workflowExecutionMap[orderId] ?: 
+            throw OrderError.WorkflowNotFound("Quote acceptance failed: WorkflowId not found for orderId=$orderId", orderId)
         
-        return try {
-            logger.debug("Accepting quote for order=$orderId, workflow=$workflowId")
+        logger.debug("Accepting quote for order=$orderId, workflow=$workflowId")
             
-            // Create a workflow stub with proper error handling
-            val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
-            
-            // Get quote with a timeout
-            val quote = try {
-                val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
-                val stub = WorkflowStub.fromTyped(workflow)
-                stub.query("getQuoteStatus", PriceQuote::class.java, 5, TimeUnit.SECONDS)
-            } catch (e: Exception) {
-                logger.error("Failed to query quote status: ${e.message}", e)
-                null
-            }
-            
-            if (quote == null) {
-                logger.error("Quote acceptance failed: No quote found for orderId=$orderId")
-                return false
-            }
-            
-            if (isExpired(quote)) {
-                logger.error("Quote acceptance failed: Quote expired for orderId=$orderId")
-                return false
-            }
-            
-            // Send accept signal to the workflow with timeout
-            try {
-                workflowStub.signal("acceptQuote")
-                logger.info("Quote successfully accepted for orderId=$orderId, price=${quote.price}")
-                true
-            } catch (e: Exception) {
-                logger.error("Error sending acceptQuote signal: ${e.message}", e)
-                false
-            }
+        // Get quote with a timeout
+        val quote = try {
+            getQuoteFromWorkflow(workflowId)
         } catch (e: Exception) {
-            logger.error("Error accepting quote for order=$orderId: ${e.message}", e)
-            false
+            logger.error("Failed to query quote status: ${e.message}", e)
+            throw OrderError.QuoteNotFound("Failed to query quote status for orderId=$orderId", orderId)
+        } ?: throw OrderError.QuoteNotFound("No quote found for orderId=$orderId", orderId)
+            
+        if (isExpired(quote)) {
+            throw OrderError.QuoteExpired("Quote expired for orderId=$orderId", orderId, quote.expiryTimeMs)
+        }
+            
+        // Send accept signal to the workflow with timeout
+        try {
+            signalWorkflow(workflowId, "acceptQuote")
+            logger.info("Quote successfully accepted for orderId=$orderId, price=${quote.price}")
+            true
+        } catch (e: Exception) {
+            logger.error("Error sending acceptQuote signal: ${e.message}", e)
+            throw OrderError.WorkflowOperationFailed("Error sending acceptQuote signal for orderId=$orderId", e)
         }
     }
     
     /**
      * Reject a quote for an order
+     * 
+     * @param orderId The ID of the order to reject the quote for
+     * @return Result containing Boolean success indicator or an OrderError
      */
-    fun rejectQuote(orderId: String): Boolean {
-        val workflowId = workflowExecutionMap[orderId] ?: run {
-            logger.error("Quote rejection failed: WorkflowId not found for orderId=$orderId")
-            return false
-        }
+    fun rejectQuote(orderId: String): Result<Boolean> = runCatching {
+        val workflowId = workflowExecutionMap[orderId] ?: 
+            throw OrderError.WorkflowNotFound("Quote rejection failed: WorkflowId not found for orderId=$orderId", orderId)
         
-        return try {
-            logger.debug("Rejecting quote for order=$orderId, workflow=$workflowId")
-            
-            val workflow = workflowClient.newWorkflowStub(
-                OrderWorkflow::class.java,
-                workflowId
-            )
-            
-            // Check if quote exists
-            val quote = workflow.getQuoteStatus()
-            if (quote == null) {
-                logger.error("Quote rejection failed: No quote found for orderId=$orderId")
-                return false
-            }
+        logger.debug("Rejecting quote for order=$orderId, workflow=$workflowId")
+        
+        try {
+            val quote = getQuoteFromWorkflow(workflowId) ?: 
+                throw OrderError.QuoteNotFound("Quote rejection failed: No quote found for orderId=$orderId", orderId)
             
             // Send reject signal to the workflow
-            workflow.rejectQuote()
+            signalWorkflow(workflowId, "rejectQuote")
             logger.info("Quote successfully rejected for orderId=$orderId")
             true
+        } catch (e: OrderError) {
+            throw e
         } catch (e: Exception) {
             logger.error("Error rejecting quote for order=$orderId: ${e.message}", e)
-            false
+            throw OrderError.WorkflowOperationFailed("Error rejecting quote for order=$orderId", e)
         }
     }
     
     /**
      * Get the status of an order workflow
+     * 
+     * @param orderId The ID of the order to get the status for
+     * @return Result containing OrderStatusResponse or an OrderError
      */
-    fun getOrderStatus(orderId: String): OrderStatusResponse? {
-        val workflowId = workflowExecutionMap[orderId] ?: return null
+    open fun getOrderStatus(orderId: String): Result<OrderStatusResponse> = runCatching {
+        val workflowId = workflowExecutionMap[orderId] ?: 
+            throw OrderError.WorkflowNotFound("Workflow not found for order ID: $orderId", orderId)
         
-        val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
-        
-        // Try to get the result, waiting for a configured period if the workflow is about to complete.
         val resultHolder = try {
-            // Wait up to the configured timeout for the workflow to complete if it's not already.
-            val res = workflowStub.getResult(workflowResultTimeoutSeconds, TimeUnit.SECONDS, String::class.java)
+            val res = getWorkflowStatus(workflowId)
             Pair(true, res)
-        } catch (e: io.temporal.client.WorkflowException) { // Includes TimeoutException if not complete within configured timeout
-            // This means the workflow is likely still in progress or genuinely timed out.
+        } catch (e: io.temporal.client.WorkflowException) {
             Pair(false, null)
         } catch (e: Exception) {
-            // Catch other potential errors like WorkflowNotFoundException separately if needed for specific handling.
             logger.error("Unexpected error getting workflow result for orderId=$orderId, workflowId=$workflowId: ${e.message}", e)
-            Pair(false, null) // Treat as not complete or an error state leading to IN_PROGRESS or a specific error status.
+            Pair(false, null)
         }
 
         val isComplete = resultHolder.first
         val resultIfComplete = resultHolder.second
         
         val status = if (isComplete && resultIfComplete != null) {
-            // Workflow is complete and we have the result.
             when {
-                resultIfComplete.contains("Order booked with ID") -> "BOOKED" // Specific check for booked
-                resultIfComplete.contains("completed successfully") -> "COMPLETED" // More general completion
+                resultIfComplete.contains("Order booked with ID") -> "BOOKED"
+                resultIfComplete.contains("completed successfully") -> "COMPLETED"
                 resultIfComplete.contains("rejected") -> "REJECTED"
                 resultIfComplete.contains("expired") -> "EXPIRED"
                 else -> {
@@ -214,25 +231,38 @@ class OrderService(
                 }
             }
         } else {
-            // Workflow is not yet complete (timed out during the configured wait or other error).
-            // Consider querying for an intermediate status if the workflow supports it.
-            // For now, if getResult times out, it's IN_PROGRESS.
             "IN_PROGRESS"
         }
         
-        return OrderStatusResponse(
+        val quoteResult = getQuote(orderId)
+        val quote = quoteResult.getOrNull()
+        
+        OrderStatusResponse(
             orderId = orderId,
             workflowId = workflowId,
             status = status,
-            quote = getQuote(orderId)
+            quote = quote
         )
     }
     
     /**
      * Get all orders currently tracked by the service
+     * 
+     * @return List of OrderStatusResponses, filtering out any that couldn't be retrieved
      */
     fun getAllOrders(): List<OrderStatusResponse> {
         return workflowExecutionMap.keys.mapNotNull { orderId ->
+            getOrderStatus(orderId).getOrNull()
+        }
+    }
+    
+    /**
+     * Get all orders with detailed results including any errors
+     *
+     * @return Map of order IDs to their Result<OrderStatusResponse>
+     */
+    fun getAllOrdersWithResults(): Map<String, Result<OrderStatusResponse>> {
+        return workflowExecutionMap.keys.associateWith { orderId ->
             getOrderStatus(orderId)
         }
     }
@@ -241,14 +271,49 @@ class OrderService(
      * Helper method to check if a quote is expired
      */
     private fun isExpired(quote: PriceQuote): Boolean {
-        // Using System time is appropriate here since this is in the service, not the workflow
-        // The workflow uses Workflow.currentTimeMillis() for deterministic behavior
         val currentTime = System.currentTimeMillis()
         val isExpired = currentTime > quote.expiryTimeMs
         if (isExpired) {
             logger.debug("Quote expired: current=$currentTime, expiry=${quote.expiryTimeMs}, diff=${currentTime - quote.expiryTimeMs}ms")
         }
         return isExpired
+    }
+    
+    /**
+     * Start a workflow execution
+     * Protected for testing purposes so it can be overridden in tests
+     */
+    protected open fun startWorkflow(workflow: OrderWorkflow, order: StructuredProductOrder): WorkflowExecution {
+        val workflowExecution = WorkflowClient.start(workflow::processOrder, order)
+        return workflowExecution
+    }
+
+    /**
+     * Helper method to get quote from workflow
+     * Protected for testing purposes so it can be overridden in tests
+     */
+    protected open fun getQuoteFromWorkflow(workflowId: String): PriceQuote? {
+        val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+        val workflowStubImpl = WorkflowStub.fromTyped(workflow)
+        return workflowStubImpl.query("getQuoteStatus", PriceQuote::class.java, 5, TimeUnit.SECONDS)
+    }
+    
+    /**
+     * Helper method to get workflow status
+     * Protected for testing purposes so it can be overridden in tests
+     */
+    protected open fun getWorkflowStatus(workflowId: String): String {
+        val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
+        return workflowStub.getResult(workflowResultTimeoutSeconds, TimeUnit.SECONDS, String::class.java)
+    }
+    
+    /**
+     * Helper method to send signal to workflow
+     * Protected for testing purposes so it can be overridden in tests
+     */
+    protected open fun signalWorkflow(workflowId: String, signalName: String) {
+        val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
+        workflowStub.signal(signalName)
     }
 }
 
@@ -276,5 +341,21 @@ data class OrderStatusResponse(
     val orderId: String,
     val workflowId: String,
     val status: String,
-    val quote: QuoteResponse?
-)
+    val quote: QuoteResponse? = null
+) {
+    companion object {
+        fun fromError(error: OrderError, orderId: String): OrderStatusResponse {
+            return OrderStatusResponse(
+                orderId = orderId,
+                workflowId = "",
+                status = when (error) {
+                    is OrderError.WorkflowNotFound -> "NOT_FOUND"
+                    is OrderError.QuoteNotFound -> "QUOTE_NOT_FOUND"
+                    is OrderError.QuoteExpired -> "QUOTE_EXPIRED"
+                    is OrderError.WorkflowOperationFailed -> "OPERATION_FAILED"
+                    is OrderError.UnknownError -> "UNKNOWN_ERROR"
+                }
+            )
+        }
+    }
+}

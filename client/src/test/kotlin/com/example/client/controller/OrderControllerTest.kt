@@ -1,5 +1,6 @@
 package com.example.client.controller
 
+import com.example.client.service.OrderError
 import com.example.client.service.OrderRequest
 import com.example.client.service.OrderService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -39,11 +40,11 @@ class OrderControllerTest {
         val workflowId = "order-$orderId"
         
         `when`(orderService.submitOrder(orderRequest)).thenReturn(
-            com.example.client.service.OrderResponse(
+            Result.success(com.example.client.service.OrderResponse(
                 orderId = orderId,
                 workflowId = workflowId,
                 status = "SUBMITTED"
-            )
+            ))
         )
         
         // When & Then
@@ -76,6 +77,7 @@ class OrderControllerTest {
             )
         )
         
+        // getAllOrders likely doesn't return Result since it's just fetching from memory
         `when`(orderService.getAllOrders()).thenReturn(orderList)
         
         // When & Then
@@ -102,7 +104,7 @@ class OrderControllerTest {
             )
         )
         
-        `when`(orderService.getOrderStatus(orderId)).thenReturn(orderStatus)
+        `when`(orderService.getOrderStatus(orderId)).thenReturn(Result.success(orderStatus))
         
         // When & Then
         mockMvc.perform(get("/api/orders/{orderId}", orderId))
@@ -117,7 +119,9 @@ class OrderControllerTest {
     fun `should return 404 when order not found`() {
         // Given
         val nonExistentOrderId = UUID.randomUUID().toString()
-        `when`(orderService.getOrderStatus(nonExistentOrderId)).thenReturn(null)
+        `when`(orderService.getOrderStatus(nonExistentOrderId)).thenReturn(
+            Result.failure(OrderError.WorkflowNotFound("Workflow not found for order ID: $nonExistentOrderId", nonExistentOrderId))
+        )
         
         // When & Then
         mockMvc.perform(get("/api/orders/{orderId}", nonExistentOrderId))
@@ -140,8 +144,8 @@ class OrderControllerTest {
             )
         )
         
-        `when`(orderService.getOrderStatus(orderId)).thenReturn(orderStatus)
-        `when`(orderService.acceptQuote(orderId)).thenReturn(true)
+        `when`(orderService.getOrderStatus(orderId)).thenReturn(Result.success(orderStatus))
+        `when`(orderService.acceptQuote(orderId)).thenReturn(Result.success(true))
         
         // When & Then
         mockMvc.perform(post("/api/orders/{orderId}/accept", orderId))
@@ -165,8 +169,8 @@ class OrderControllerTest {
             )
         )
         
-        `when`(orderService.getOrderStatus(orderId)).thenReturn(orderStatus)
-        `when`(orderService.rejectQuote(orderId)).thenReturn(true)
+        `when`(orderService.getOrderStatus(orderId)).thenReturn(Result.success(orderStatus))
+        `when`(orderService.rejectQuote(orderId)).thenReturn(Result.success(true))
         
         // When & Then
         mockMvc.perform(post("/api/orders/{orderId}/reject", orderId))
