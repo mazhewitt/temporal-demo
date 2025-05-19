@@ -142,3 +142,107 @@ This application demonstrates a full-stack implementation of a workflow-based or
 2. The Spring Boot backend provides REST APIs for order management
 3. Temporal workflows handle the business logic for order processing, quoting, and fulfillment
 4. The system provides real-time updates on order status and quotes
+
+## Development Best Practices
+
+### Using the Result Pattern
+
+This project uses Kotlin's Result pattern to handle errors in a type-safe way when interacting with Temporal workflows. Here's how to use it:
+
+1. **Service methods should return Result<T>**:
+
+```kotlin
+fun getOrderStatus(orderId: String): Result<OrderStatusResponse> {
+    val workflowId = getWorkflowIdForOrder(orderId) ?: return Result.failure(
+        OrderError.OrderNotFound("Order not found with ID: $orderId", orderId)
+    )
+    
+    return try {
+        val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+        val status = getWorkflowStatus(workflowId)
+        val quote = getQuoteFromWorkflow(workflowId)
+        
+        Result.success(OrderStatusResponse(
+            orderId = orderId,
+            workflowId = workflowId,
+            status = status,
+            quote = quote?.let { mapToQuoteResponse(it) }
+        ))
+    } catch (e: Exception) {
+        Result.failure(mapWorkflowException(e, orderId))
+    }
+}
+```
+
+2. **Controllers should use fold for handling success/failure**:
+
+```kotlin
+@GetMapping("/orders/{orderId}")
+fun getOrderStatus(@PathVariable orderId: String): ResponseEntity<Any> {
+    return orderService.getOrderStatus(orderId).fold(
+        onSuccess = { statusResponse -> 
+            ResponseEntity.ok(statusResponse) 
+        },
+        onFailure = { error -> 
+            handleOrderError(error)
+        }
+    )
+}
+```
+
+3. **Create custom error types with a sealed class**:
+
+```kotlin
+sealed class OrderError(
+    message: String,
+    val orderId: String
+) : Exception(message) {
+    class OrderNotFound(message: String, orderId: String) : OrderError(message, orderId)
+    class WorkflowNotFound(message: String, orderId: String) : OrderError(message, orderId)
+    class QuoteExpired(message: String, orderId: String, val expiryTime: Long) : OrderError(message, orderId)
+    // Other specific error types...
+    class Unknown(message: String, orderId: String) : OrderError(message, orderId)
+}
+```
+
+4. **Map external exceptions to domain errors**:
+
+```kotlin
+private fun mapWorkflowException(e: Exception, orderId: String): OrderError {
+    return when (e) {
+        is WorkflowNotFoundException -> OrderError.WorkflowNotFound(
+            "Workflow not found for order ID: $orderId", orderId
+        )
+        is WorkflowExecutionAlreadyCompletedException -> OrderError.WorkflowCompleted(
+            "Workflow already completed for order ID: $orderId", orderId
+        )
+        is IllegalStateException -> {
+            if (e.message?.contains("expired", ignoreCase = true) == true) {
+                OrderError.QuoteExpired(e.message ?: "Quote expired", orderId, System.currentTimeMillis())
+            } else {
+                OrderError.Unknown(e.message ?: "Unknown error", orderId)
+            }
+        }
+        else -> OrderError.Unknown("Unexpected error: ${e.message}", orderId)
+    }
+}
+```
+
+5. **Use custom assertions in tests**:
+
+```kotlin
+fun <T> Result<T>.assertSuccess(): T {
+    assertTrue(isSuccess, {
+        val error = exceptionOrNull()
+        "Expected Result to be successful but was failure with: ${error?.message ?: error}"
+    })
+    return getOrThrow()
+}
+
+fun <T> Result<T>.assertFailure(): Throwable {
+    assertTrue(isFailure, "Expected Result to be failure but was success with: ${getOrNull()}")
+    return exceptionOrNull()!!
+}
+```
+
+For more details on testing with the Result pattern, see the [Testing Documentation](./TESTING.md).

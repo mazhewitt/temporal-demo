@@ -1,6 +1,6 @@
-# Temporal Workflow Example
+# Temporal Workflow Example - Trading System
 
-This project demonstrates a structured product order processing workflow using [Temporal](https://temporal.io/), a microservice orchestration platform. The workflow processes a structured product order through multiple stages: validation, pricing, execution, and booking.
+This project demonstrates a structured product order processing workflow using [Temporal](https://temporal.io/), a microservice orchestration platform. The workflow processes a structured product order through multiple stages: validation, pricing, execution, and booking, showcasing how to use Temporal for trading use cases.
 
 ## Project Structure
 
@@ -57,48 +57,261 @@ This script will:
 2. Start the worker process in the background
 3. Start the Spring Boot web application
 
-Alternatively, you can run components individually:
-
-#### Start the Worker
-```bash
-./gradlew :worker:run
-```
-
-#### Start the Backend API
-```bash
-./gradlew :client:bootRun
-```
-
-#### Start the React Frontend in Development Mode
-```bash
-cd client/frontend
-npm install
-npm run dev
-```
-
 Once running, you can access:
-- Web UI: http://localhost:8081 (production) or http://localhost:5173 (development)
+- Web UI: http://localhost:8081
 - Temporal UI: http://localhost:8080
 - REST API: http://localhost:8081/api
 
-### 4. Running the E2E Test
+## How to Use Temporal for Trading Workflows
 
-The project includes an end-to-end test that creates a workflow execution and verifies the result:
+This project demonstrates several key Temporal concepts in the context of a trading application:
 
-```bash
-./gradlew :client:test --tests "com.example.client.OrderWorkflowE2ETest"
+### 1. Workflow Definition
+
+The workflow API (`OrderWorkflow` interface) defines the contract for the trading workflow:
+
+```kotlin
+interface OrderWorkflow {
+    // Main workflow method - processes an order from submission to completion
+    fun processOrder(order: StructuredProductOrder): String
+    
+    // Signal methods for client interactions
+    @SignalMethod
+    fun acceptQuote()
+    
+    @SignalMethod
+    fun rejectQuote()
+    
+    // Query method to check the current quote status
+    @QueryMethod
+    fun getQuoteStatus(): PriceQuote?
+}
 ```
 
-## How the Test Works
+### 2. Workflow Implementation
 
-The E2E test (`OrderWorkflowE2ETest`) works as follows:
+The implementation (`OrderWorkflowImpl`) shows how to:
 
-1. **Setup**: Connects to the Temporal service running on `localhost:7233`
-2. **Test Execution**:
-   - Creates a sample `StructuredProductOrder` with random UUID
-   - Submits the order to the Temporal workflow using the `ORDER_TASK_QUEUE`
-   - Waits for the workflow to complete (with a 10-second timeout)
-3. **Comprehensive Verification**:
+- Create activity stubs with timeout configurations
+- Implement a multi-step workflow with decision points
+- Use signals for client interactions (accept/reject quotes)
+- Use queries to expose workflow state (quote status)
+- Handle timeouts and expirations
+
+Key features:
+```kotlin
+// Creating activity stubs with timeout configuration
+private val activities = Workflow.newActivityStub(
+    OrderActivities::class.java,
+    ActivityOptions.newBuilder()
+        .setStartToCloseTimeout(Duration.ofSeconds(30))
+        .build()
+)
+
+// Waiting for client decision or timeout
+Workflow.await(quoteTimeout, {
+    quoteAccepted || quoteRejected || isQuoteExpired()
+})
+
+// Signal method implementation
+override fun acceptQuote() {
+    quoteAccepted = true
+}
+```
+
+### 3. Activities Definition
+
+Activities represent the actual business logic executed by the workflow:
+
+```kotlin
+interface OrderActivities {
+    fun validateOrder(order: StructuredProductOrder): ValidationResult
+    fun createQuote(order: StructuredProductOrder): PriceQuote
+    fun executeOrder(order: StructuredProductOrder, quote: PriceQuote): ExecutionResult
+    fun bookOrder(executionResult: ExecutionResult): BookingResult
+}
+```
+
+### 4. Client Integration
+
+The client (`OrderService`) shows how to:
+
+- Connect to Temporal service
+- Start workflows with options
+- Signal running workflows
+- Query workflow state
+- Handle workflow errors with the Result pattern
+
+Example:
+```kotlin
+// Starting a workflow
+val workflow = workflowClient.newWorkflowStub(
+    OrderWorkflow::class.java,
+    WorkflowOptions.newBuilder()
+        .setTaskQueue(taskQueueName)
+        .setWorkflowId("order-${order.orderId}")
+        .build()
+)
+val execution = WorkflowClient.start(workflow::processOrder, workflowOrder)
+
+// Querying workflow status
+val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+val quote = workflow.getQuoteStatus()
+
+// Signaling a workflow
+val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+workflow.acceptQuote()
+```
+
+## Testing Temporal Workflows
+
+This project showcases different testing approaches for Temporal workflows:
+
+### 1. Unit Testing with Test Environment
+
+The `OrderServiceTest` demonstrates how to:
+
+- Create mock objects for Temporal clients
+- Use inheritance and overriding for testability
+- Test error conditions with custom error types
+- Use the Result pattern to handle and assert errors
+
+Example of testable service design:
+```kotlin
+// Protected helper methods for better testability
+protected open fun getQuoteFromWorkflow(workflowId: String): PriceQuote? {
+    val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+    val workflowStubImpl = WorkflowStub.fromTyped(workflow)
+    return workflowStubImpl.query("getQuoteStatus", PriceQuote::class.java, 5, TimeUnit.SECONDS)
+}
+
+// In tests, create a subclass that overrides these methods
+val testOrderService = object : OrderService(workflowClient, taskQueueName, timeoutSeconds) {
+    override fun getQuoteFromWorkflow(workflowId: String): PriceQuote? {
+        return sampleQuote
+    }
+}
+```
+
+### 2. Integration Testing with TestWorkflowEnvironment
+
+The `OrderWorkflowE2ETest` shows how to:
+
+- Create a test workflow environment
+- Register test implementations of workflows and activities
+- Test the entire workflow execution including signals
+- Use time skipping for testing time-dependent logic
+- Assert workflow results
+
+Example:
+```kotlin
+// Setup test environment
+testEnv = TestWorkflowEnvironment.newInstance()
+client = testEnv.workflowClient
+val worker = testEnv.newWorker(taskQueue)
+worker.registerWorkflowImplementationTypes(TestOrderWorkflowImpl::class.java)
+worker.registerActivitiesImplementations(TestOrderActivitiesImpl())
+testEnv.start()
+
+// Start workflow and test signals
+val workflow: OrderWorkflow = client.newWorkflowStub(OrderWorkflow::class.java, options)
+WorkflowClient.start(workflow::processOrder, order)
+testEnv.sleep(java.time.Duration.ofMillis(500)) // Ensure workflow has processed initial steps
+workflow.acceptQuote() // Send signal
+val result = workflowStub.getResult(5, TimeUnit.SECONDS, String::class.java)
+```
+
+### 3. Error Handling Testing with Spring
+
+The `QuoteErrorHandlingTest` demonstrates:
+
+- Testing expired quotes and error conditions
+- Using Spring's test infrastructure for API endpoint testing
+- Mocking service responses to simulate errors
+- Testing API responses for different error types
+
+Example:
+```kotlin
+// Mock expired quote scenario
+val expiredQuote = QuoteResponse(
+    orderId = orderId,
+    price = 1000.0,
+    expiresAt = System.currentTimeMillis() - 1000,
+    isExpired = true
+)
+
+Mockito.`when`(orderService.acceptQuote(orderId)).thenReturn(
+    Result.failure(OrderError.QuoteExpired("Quote expired", orderId, expiredQuote.expiresAt))
+)
+
+// Test API response
+val acceptResponse = restTemplate.postForEntity(
+    "$baseUrl/orders/$orderId/accept",
+    HttpEntity<Any>(headers),
+    Map::class.java
+)
+Assertions.assertEquals(HttpStatus.BAD_REQUEST, acceptResponse.statusCode)
+```
+
+### 4. Result Pattern for Error Handling
+
+The application uses the Kotlin `Result` type to improve null safety and error handling:
+
+```kotlin
+// Using Result in service layer
+return try {
+    val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+    workflow.acceptQuote()
+    Result.success(true)
+} catch (e: Exception) {
+    Result.failure(mapWorkflowException(e, workflowId))
+}
+
+// Using fold for concise handling in controller
+return orderService.acceptQuote(orderId).fold(
+    onSuccess = {
+        ResponseEntity.ok(mapOf("message" to "Quote accepted successfully"))
+    },
+    onFailure = { error ->
+        handleOrderError(error)
+    }
+)
+```
+
+## Running the Tests
+
+To run all tests:
+```bash
+./gradlew test
+```
+
+To run a specific test class:
+```bash
+./gradlew test --tests "com.example.client.OrderWorkflowE2ETest"
+```
+
+For detailed information on testing approaches and patterns used in this project, see the [Testing Documentation](./TESTING.md).
+
+## Best Practices Demonstrated
+
+1. **Separation of API from Implementation**: Using the workflow-api module to define interfaces used by both client and worker.
+
+2. **Error Handling with Result**: Using Kotlin's Result type for improved error handling and null safety.
+
+3. **Testability**: Using protected methods and inheritance to make services more testable.
+
+4. **End-to-End Testing**: Using TestWorkflowEnvironment for complete workflow tests.
+
+5. **Signals and Queries**: Using Temporal's signal and query features for client interactions.
+
+6. **Timeouts and Retries**: Configuring proper timeouts for activities and workflows.
+
+7. **Web Frontend Integration**: Integrating with a React frontend for a complete trading application experience.
+
+For more details on specific modules, refer to their individual README files:
+- [Client Module Documentation](./client/README.md)
+- [Worker Module Documentation](./worker/README.md)
+- [Workflow API Documentation](./workflow-api/README.md)
    - Verifies that the workflow returns a non-null result
    - Confirms that the result contains "Order workflow completed successfully"
    - Validates that the order was successfully booked with the correct order ID

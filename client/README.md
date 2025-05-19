@@ -74,6 +74,101 @@ Access the application at http://localhost:8081
 
 ## Key Components
 
+### Using the Result Pattern for Error Handling
+
+This project demonstrates the use of Kotlin's `Result<T>` type to improve error handling and null safety, especially when working with Temporal workflows:
+
+```kotlin
+// Service method returning Result<T>
+fun acceptQuote(orderId: String): Result<Boolean> {
+    val workflowId = getWorkflowIdForOrder(orderId) ?: return Result.failure(
+        OrderError.OrderNotFound("Order not found with ID: $orderId", orderId)
+    )
+    
+    return try {
+        // Protected method that can be overridden in tests
+        signalWorkflow(workflowId, "acceptQuote")
+        Result.success(true)
+    } catch (e: Exception) {
+        Result.failure(mapWorkflowException(e, orderId))
+    }
+}
+
+// Controller using fold for concise error handling
+@PostMapping("/orders/{orderId}/accept")
+fun acceptQuote(@PathVariable orderId: String): ResponseEntity<Any> {
+    // Check if the order exists first
+    val orderStatusResult = orderService.getOrderStatus(orderId)
+    
+    if (orderStatusResult.isFailure) {
+        val error = orderStatusResult.exceptionOrNull()
+        if (error != null) {
+            return handleOrderError(error)
+        }
+    }
+    
+    // Check if the order has a quote
+    val statusResponse = orderStatusResult.getOrNull()
+    if (statusResponse?.quote == null) {
+        return ResponseEntity.badRequest()
+            .body(mapOf("error" to "No quote available for order: $orderId"))
+    }
+    
+    // Using the Result pattern with fold for concise code
+    return orderService.acceptQuote(orderId).fold(
+        onSuccess = { 
+            ResponseEntity.ok(mapOf("message" to "Quote accepted successfully")) 
+        },
+        onFailure = { handleOrderError(it) }
+    )
+}
+```
+
+### Testing with Result Pattern
+
+The test classes use custom assertions to work with the Result type:
+
+```kotlin
+// Result assertion extensions
+fun <T> Result<T>.assertSuccess(): T {
+    Assertions.assertTrue(isSuccess, {
+        val error = exceptionOrNull()
+        "Expected Result to be successful but was failure with: ${error?.message ?: error}"
+    })
+    return getOrThrow()
+}
+
+fun <T> Result<T>.assertFailure(): Throwable {
+    Assertions.assertTrue(isFailure, "Expected Result to be failure but was success with: ${getOrNull()}")
+    return exceptionOrNull()!!
+}
+
+// Using them in tests
+@Test
+fun `should return failure when quote has expired`() {
+    // Given
+    val orderId = UUID.randomUUID().toString()
+    val workflowId = "order-$orderId"
+    val expiredQuote = PriceQuote(
+        orderId = orderId,
+        price = 500.0,
+        expiresAt = System.currentTimeMillis() - 1000, // already expired
+        isExpired = true
+    )
+    
+    val testOrderService = object : OrderService(workflowClient, taskQueueName, workflowResultTimeoutSeconds) {
+        override fun getQuoteFromWorkflow(workflowId: String): PriceQuote? = expiredQuote
+    }
+    
+    // When
+    val result = testOrderService.acceptQuote(orderId)
+    
+    // Then
+    val error = result.assertFailure()
+    assertOrderErrorOfType<OrderError.QuoteExpired>(error)
+}
+```
+
 ### End-to-End Test
 
 The `OrderWorkflowE2ETest` class provides a JUnit 5 test for verifying workflow functionality:
@@ -83,22 +178,54 @@ The `OrderWorkflowE2ETest` class provides a JUnit 5 test for verifying workflow 
 @DisplayName("Order Workflow E2E Tests")
 class OrderWorkflowE2ETest {
 
+    private lateinit var testEnv: TestWorkflowEnvironment
     private lateinit var client: WorkflowClient
-    private lateinit var service: WorkflowServiceStubs
     private val taskQueue = "ORDER_TASK_QUEUE"
 
     @BeforeEach
     fun setUp() {
-        // Connect to Temporal service
-        service = WorkflowServiceStubs.newServiceStubs(
-            WorkflowServiceStubsOptions.newBuilder()
-                .setTarget("127.0.0.1:7233")
-                .build()
-        )
-        client = WorkflowClient.newInstance(service)
+        // Create the test workflow environment
+        testEnv = TestWorkflowEnvironment.newInstance()
+        client = testEnv.workflowClient
+        
+        // Create a worker for the task queue
+        val worker = testEnv.newWorker(taskQueue)
+        
+        // Register workflow and activities with test implementations
+        worker.registerWorkflowImplementationTypes(TestOrderWorkflowImpl::class.java)
+        worker.registerActivitiesImplementations(TestOrderActivitiesImpl())
+        
+        // Start the worker
+        testEnv.start()
     }
-
+    
     @Test
+    @DisplayName("Should process RFQ order successfully when client accepts quote")
+    @Timeout(value = 10, unit = TimeUnit.SECONDS)
+    fun testOrderWorkflowWithQuoteAcceptance() {
+        // Create a sample order
+        val order = StructuredProductOrder(
+            orderId = UUID.randomUUID().toString(),
+            productType = "Equity Swap",
+            quantity = 10,
+            client = "TestClient"
+        )
+
+        // Start workflow and test interactions
+        val workflow: OrderWorkflow = client.newWorkflowStub(OrderWorkflow::class.java, options)
+        WorkflowClient.start(workflow::processOrder, order)
+        
+        // Test query functionality
+        val quote = workflow.getQuoteStatus()
+        
+        // Test signal functionality
+        workflow.acceptQuote()
+        
+        // Verify workflow completion
+        val result = workflowStub.getResult(5, TimeUnit.SECONDS, String::class.java)
+        // Assertions...
+    }
+}
     @DisplayName("Should process RFQ order successfully when client accepts quote")
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     fun testOrderWorkflowWithQuoteAcceptance() {
