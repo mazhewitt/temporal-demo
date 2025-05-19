@@ -81,6 +81,6 @@ class OrderWorkflowImpl : OrderWorkflow {
     
     private fun isQuoteExpired(): Boolean {
         val quote = currentQuote ?: return true
-        return System.currentTimeMillis() > quote.expiryTimeMs
+        return Workflow.currentTimeMillis() > quote.expiryTimeMs
     }
 }

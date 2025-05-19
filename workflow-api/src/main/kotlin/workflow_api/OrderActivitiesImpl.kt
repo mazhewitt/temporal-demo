@@ -17,7 +17,8 @@ class OrderActivitiesImpl : OrderActivities {
         val basePrice = 100.0
         val price = basePrice * order.quantity
         
-        // Quote expires in 15 minutes
+        // Quote expires in 15 minutes - using System time is fine in Activities
+        // Activities run in the real world, not in the deterministic Workflow environment
         val expiryTimeMs = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(15)
         
         return PriceQuote(order.orderId, price, expiryTimeMs)

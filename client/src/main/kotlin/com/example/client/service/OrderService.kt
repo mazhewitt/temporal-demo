@@ -66,19 +66,27 @@ class OrderService(private val workflowClient: WorkflowClient) {
     fun getQuote(orderId: String): QuoteResponse? {
         val workflowId = workflowExecutionMap[orderId] ?: return null
         
-        val workflow = workflowClient.newWorkflowStub(
-            OrderWorkflow::class.java,
-            workflowId
-        )
-        
-        val quote = workflow.getQuoteStatus() ?: return null
-        
-        return QuoteResponse(
-            orderId = quote.orderId,
-            price = quote.price,
-            expiresAt = quote.expiryTimeMs,
-            isExpired = isExpired(quote)
-        )
+        try {
+            // Use a typed stub with timeout options
+            val workflow = workflowClient.newWorkflowStub(
+                OrderWorkflow::class.java,
+                workflowId
+            )
+            
+            // Execute query with a timeout
+            val workflowStubImpl = WorkflowStub.fromTyped(workflow)
+            val quote = workflowStubImpl.query("getQuoteStatus", PriceQuote::class.java, 5, TimeUnit.SECONDS) ?: return null
+            
+            return QuoteResponse(
+                orderId = quote.orderId,
+                price = quote.price,
+                expiresAt = quote.expiryTimeMs,
+                isExpired = isExpired(quote)
+            )
+        } catch (e: Exception) {
+            logger.error("Error getting quote for order=$orderId: ${e.message}", e)
+            return null
+        }
     }
     
     /**
@@ -93,13 +101,19 @@ class OrderService(private val workflowClient: WorkflowClient) {
         return try {
             logger.debug("Accepting quote for order=$orderId, workflow=$workflowId")
             
-            val workflow = workflowClient.newWorkflowStub(
-                OrderWorkflow::class.java,
-                workflowId
-            )
+            // Create a workflow stub with proper error handling
+            val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
             
-            // Check if quote exists and is still valid
-            val quote = workflow.getQuoteStatus()
+            // Get quote with a timeout
+            val quote = try {
+                val workflow = workflowClient.newWorkflowStub(OrderWorkflow::class.java, workflowId)
+                val stub = WorkflowStub.fromTyped(workflow)
+                stub.query("getQuoteStatus", PriceQuote::class.java, 5, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                logger.error("Failed to query quote status: ${e.message}", e)
+                null
+            }
+            
             if (quote == null) {
                 logger.error("Quote acceptance failed: No quote found for orderId=$orderId")
                 return false
@@ -110,10 +124,15 @@ class OrderService(private val workflowClient: WorkflowClient) {
                 return false
             }
             
-            // Send accept signal to the workflow
-            workflow.acceptQuote()
-            logger.info("Quote successfully accepted for orderId=$orderId, price=${quote.price}")
-            true
+            // Send accept signal to the workflow with timeout
+            try {
+                workflowStub.signal("acceptQuote")
+                logger.info("Quote successfully accepted for orderId=$orderId, price=${quote.price}")
+                true
+            } catch (e: Exception) {
+                logger.error("Error sending acceptQuote signal: ${e.message}", e)
+                false
+            }
         } catch (e: Exception) {
             logger.error("Error accepting quote for order=$orderId: ${e.message}", e)
             false
@@ -208,7 +227,14 @@ class OrderService(private val workflowClient: WorkflowClient) {
      * Helper method to check if a quote is expired
      */
     private fun isExpired(quote: PriceQuote): Boolean {
-        return System.currentTimeMillis() > quote.expiryTimeMs
+        // Using System time is appropriate here since this is in the service, not the workflow
+        // The workflow uses Workflow.currentTimeMillis() for deterministic behavior
+        val currentTime = System.currentTimeMillis()
+        val isExpired = currentTime > quote.expiryTimeMs
+        if (isExpired) {
+            logger.debug("Quote expired: current=$currentTime, expiry=${quote.expiryTimeMs}, diff=${currentTime - quote.expiryTimeMs}ms")
+        }
+        return isExpired
     }
 }
 

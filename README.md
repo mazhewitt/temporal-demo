@@ -13,7 +13,6 @@ This project demonstrates a structured product order processing workflow using [
 ## Prerequisites
 
 - JDK 21 or higher
-- Docker and Docker Compose
 - Kubernetes cluster (local like Minikube, Docker Desktop, or Kind)
 - Helm
 
