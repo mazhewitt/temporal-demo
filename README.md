@@ -8,7 +8,6 @@ This project demonstrates a structured product order processing workflow using [
 - **[worker](./worker/README.md)**: Implements the workflow logic and activities
 - **[client](./client/README.md)**: Web application with Spring Boot and React frontend for submitting and managing orders
 
-> **Note**: There's a duplicate directory `workflow_api` alongside `workflow-api` in the project. The build files reference `workflow-api` (with a hyphen), which is the correct version to use. For cleanup, consider removing the `workflow_api` (with underscore) directory if not needed.
 
 ## Prerequisites
 
