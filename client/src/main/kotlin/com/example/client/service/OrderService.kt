@@ -12,10 +12,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 @Service
-class OrderService(private val workflowClient: WorkflowClient) {
+class OrderService(
+    private val workflowClient: WorkflowClient,
+    private val taskQueueName: String = "ORDER_TASK_QUEUE", // Modified: taskQueue is now a constructor param with a default
+    private val workflowResultTimeoutSeconds: Long = 5 // Add configurable timeout with default of 5 seconds
+) {
     
     private val logger = org.slf4j.LoggerFactory.getLogger(OrderService::class.java)
-    private val taskQueue = "ORDER_TASK_QUEUE"
     
     // Store of active workflow IDs to their order IDs for tracking
     private val workflowExecutionMap = ConcurrentHashMap<String, String>()
@@ -37,7 +40,7 @@ class OrderService(private val workflowClient: WorkflowClient) {
         
         // Create workflow options
         val workflowOptions = WorkflowOptions.newBuilder()
-            .setTaskQueue(taskQueue)
+            .setTaskQueue(this.taskQueueName) // Modified: Use the taskQueueName from constructor
             .setWorkflowId("order-$orderId")
             .build()
         
@@ -181,28 +184,39 @@ class OrderService(private val workflowClient: WorkflowClient) {
         
         val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
         
-        // Check if workflow has completed
-        val isComplete = try {
-            workflowStub.getResult(0, TimeUnit.MILLISECONDS, String::class.java)
-            true
+        // Try to get the result, waiting for a configured period if the workflow is about to complete.
+        val resultHolder = try {
+            // Wait up to the configured timeout for the workflow to complete if it's not already.
+            val res = workflowStub.getResult(workflowResultTimeoutSeconds, TimeUnit.SECONDS, String::class.java)
+            Pair(true, res)
+        } catch (e: io.temporal.client.WorkflowException) { // Includes TimeoutException if not complete within configured timeout
+            // This means the workflow is likely still in progress or genuinely timed out.
+            Pair(false, null)
         } catch (e: Exception) {
-            false
+            // Catch other potential errors like WorkflowNotFoundException separately if needed for specific handling.
+            logger.error("Unexpected error getting workflow result for orderId=$orderId, workflowId=$workflowId: ${e.message}", e)
+            Pair(false, null) // Treat as not complete or an error state leading to IN_PROGRESS or a specific error status.
         }
+
+        val isComplete = resultHolder.first
+        val resultIfComplete = resultHolder.second
         
-        // Get the current status
-        val status = if (isComplete) {
-            try {
-                val result = workflowStub.getResult(0, TimeUnit.MILLISECONDS, String::class.java)
-                when {
-                    result.contains("completed successfully") -> "COMPLETED"
-                    result.contains("rejected") -> "REJECTED"
-                    result.contains("expired") -> "EXPIRED"
-                    else -> "UNKNOWN"
+        val status = if (isComplete && resultIfComplete != null) {
+            // Workflow is complete and we have the result.
+            when {
+                resultIfComplete.contains("Order booked with ID") -> "BOOKED" // Specific check for booked
+                resultIfComplete.contains("completed successfully") -> "COMPLETED" // More general completion
+                resultIfComplete.contains("rejected") -> "REJECTED"
+                resultIfComplete.contains("expired") -> "EXPIRED"
+                else -> {
+                    logger.warn("Workflow for orderId=$orderId completed with unexpected message: '$resultIfComplete'")
+                    "UNKNOWN" 
                 }
-            } catch (e: Exception) {
-                "ERROR"
             }
         } else {
+            // Workflow is not yet complete (timed out during the configured wait or other error).
+            // Consider querying for an intermediate status if the workflow supports it.
+            // For now, if getResult times out, it's IN_PROGRESS.
             "IN_PROGRESS"
         }
         
