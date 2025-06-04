@@ -42,6 +42,11 @@ sealed class OrderError(override val message: String, cause: Throwable? = null) 
         val errorMessage: String, 
         val errorCause: Throwable? = null
     ) : OrderError(errorMessage, errorCause)
+    
+    /**
+     * Exception to indicate workflow is still in progress (not an actual error)
+     */
+    object WorkflowInProgress : OrderError("Workflow is still in progress")
 }
 
 @Service
@@ -206,33 +211,38 @@ class OrderService(
         val workflowId = workflowExecutionMap[orderId] ?: 
             throw OrderError.WorkflowNotFound("Workflow not found for order ID: $orderId", orderId)
         
-        val resultHolder = try {
-            val res = getWorkflowStatus(workflowId)
-            Pair(true, res)
+        val workflowResult = try {
+            getWorkflowStatusResult(workflowId)
         } catch (e: io.temporal.client.WorkflowException) {
-            Pair(false, null)
+            Result.failure(OrderError.WorkflowInProgress)
         } catch (e: Exception) {
             logger.error("Unexpected error getting workflow result for orderId=$orderId, workflowId=$workflowId: ${e.message}", e)
-            Pair(false, null)
+            Result.failure(OrderError.WorkflowInProgress)
         }
 
-        val isComplete = resultHolder.first
-        val resultIfComplete = resultHolder.second
-        
-        val status = if (isComplete && resultIfComplete != null) {
-            when {
-                resultIfComplete.contains("Order booked with ID") -> "BOOKED"
-                resultIfComplete.contains("completed successfully") -> "COMPLETED"
-                resultIfComplete.contains("rejected") -> "REJECTED"
-                resultIfComplete.contains("expired") -> "EXPIRED"
-                else -> {
-                    logger.warn("Workflow for orderId=$orderId completed with unexpected message: '$resultIfComplete'")
-                    "UNKNOWN" 
+        val status = workflowResult.fold(
+            onSuccess = { result ->
+                when {
+                    result.contains("Order booked with ID") -> "BOOKED"
+                    result.contains("completed successfully") -> "COMPLETED"
+                    result.contains("rejected") -> "REJECTED"
+                    result.contains("expired") -> "EXPIRED"
+                    else -> {
+                        logger.warn("Workflow for orderId=$orderId completed with unexpected message: '$result'")
+                        "UNKNOWN" 
+                    }
+                }
+            },
+            onFailure = { exception ->
+                when (exception) {
+                    is OrderError.WorkflowInProgress -> "IN_PROGRESS"
+                    else -> {
+                        logger.error("Workflow error for orderId=$orderId: ${exception.message}", exception)
+                        "FAILED"
+                    }
                 }
             }
-        } else {
-            "IN_PROGRESS"
-        }
+        )
         
         val quoteResult = getQuote(orderId)
         val quote = quoteResult.getOrNull()
@@ -304,7 +314,37 @@ class OrderService(
      */
     protected open fun getWorkflowStatus(workflowId: String): String {
         val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
-        return workflowStub.getResult(workflowResultTimeoutSeconds, TimeUnit.SECONDS, String::class.java)
+        
+        return try {
+            // Try to get the result with the configured timeout
+            workflowStub.getResult(workflowResultTimeoutSeconds, TimeUnit.SECONDS, String::class.java)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            // TimeoutException means the workflow is still running
+            "IN_PROGRESS"
+        } catch (e: Exception) {
+            // Other exceptions indicate workflow failure or other issues
+            "FAILED: ${e.message}"
+        }
+    }
+    
+    /**
+     * Helper method to get workflow status as Result
+     * Protected for testing purposes so it can be overridden in tests
+     */
+    protected open fun getWorkflowStatusResult(workflowId: String): Result<String> {
+        val workflowStub = workflowClient.newUntypedWorkflowStub(workflowId)
+        
+        return try {
+            // Try to get the result with the configured timeout
+            val result = workflowStub.getResult(workflowResultTimeoutSeconds, TimeUnit.SECONDS, String::class.java)
+            Result.success(result)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            // TimeoutException means the workflow is still running
+            Result.failure(OrderError.WorkflowInProgress)
+        } catch (e: Exception) {
+            // Other exceptions indicate workflow failure or other issues
+            Result.failure(OrderError.WorkflowOperationFailed("Workflow operation failed: ${e.message}", e))
+        }
     }
     
     /**
@@ -354,6 +394,7 @@ data class OrderStatusResponse(
                     is OrderError.QuoteExpired -> "QUOTE_EXPIRED"
                     is OrderError.WorkflowOperationFailed -> "OPERATION_FAILED"
                     is OrderError.UnknownError -> "UNKNOWN_ERROR"
+                    is OrderError.WorkflowInProgress -> "IN_PROGRESS"
                 }
             )
         }

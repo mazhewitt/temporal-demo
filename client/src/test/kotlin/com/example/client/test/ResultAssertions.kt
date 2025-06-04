@@ -121,6 +121,7 @@ fun <T> Result<T>.assertOrderError(orderId: String, messageContains: String? = n
         is OrderError.QuoteExpired -> Assertions.assertEquals(orderId, error.orderId)
         is OrderError.WorkflowOperationFailed -> {}
         is OrderError.UnknownError -> {}
+        is OrderError.WorkflowInProgress -> {} // Workflow in progress, no specific validation needed
     }
     
     if (messageContains != null) {
@@ -131,6 +132,7 @@ fun <T> Result<T>.assertOrderError(orderId: String, messageContains: String? = n
             is OrderError.QuoteExpired -> error.errorMessage
             is OrderError.WorkflowOperationFailed -> error.errorMessage
             is OrderError.UnknownError -> error.errorMessage
+            is OrderError.WorkflowInProgress -> error.message // Use the base message for WorkflowInProgress
         }
         
         Assertions.assertTrue(actualMessage.contains(messageContains), {

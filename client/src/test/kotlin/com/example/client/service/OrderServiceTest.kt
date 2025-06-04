@@ -329,8 +329,8 @@ class OrderServiceTest {
         
         // Create a test subclass with overriding methods to avoid static mocking
         val testOrderService = object : OrderService(workflowClient, taskQueueName, workflowResultTimeoutSeconds) {
-            override fun getWorkflowStatus(workflowId: String): String {
-                return "Order completed successfully"
+            override fun getWorkflowStatusResult(workflowId: String): Result<String> {
+                return Result.success("Order completed successfully")
             }
             
             override fun getQuoteFromWorkflow(workflowId: String): PriceQuote? {
@@ -376,9 +376,9 @@ class OrderServiceTest {
         
         // Create a test subclass with overriding methods to avoid static mocking
         val testOrderService = object : OrderService(workflowClient, taskQueueName, workflowResultTimeoutSeconds) {
-            override fun getWorkflowStatus(workflowId: String): String {
-                // Simulate workflow not complete yet by throwing an exception
-                throw RuntimeException("Workflow not complete")
+            override fun getWorkflowStatusResult(workflowId: String): Result<String> {
+                // Simulate workflow not complete yet by returning a failure with WorkflowInProgress
+                return Result.failure(OrderError.WorkflowInProgress)
             }
             
             override fun getQuoteFromWorkflow(workflowId: String): PriceQuote? {
